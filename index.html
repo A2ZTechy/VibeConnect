@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VibeConnect - Chat with Strangers</title>
+    <!-- Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts for a clean, modern look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        /* Custom styles for video elements to ensure they fit correctly */
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror effect for a more natural feel */
+        }
+        /* Style for the remote video to not be mirrored */
+        #remoteVideo {
+            transform: scaleX(1);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+
+    <div id="app-container" class="w-full max-w-6xl mx-auto p-4">
+
+        <!-- Landing Page View -->
+        <div id="landing-page" class="text-center transition-opacity duration-500">
+            <h1 class="text-5xl md:text-7xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 text-transparent bg-clip-text mb-4">VibeConnect</h1>
+            <p class="text-lg md:text-xl text-gray-300 max-w-2xl mx-auto mb-8">
+                Jump into conversations with people from around the world. Click start to begin your journey and meet someone new instantly.
+            </p>
+            <button id="start-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-full text-lg transition-all duration-300 transform hover:scale-105 shadow-lg shadow-indigo-500/50">
+                Start Connecting
+            </button>
+            <!-- Error Message Container -->
+            <div id="error-container" class="mt-4 text-red-400 font-semibold hidden"></div>
+        </div>
+
+        <!-- Video Chat View -->
+        <div id="chat-page" class="hidden transition-opacity duration-500">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 relative">
+                <!-- Remote Video -->
+                <div class="bg-gray-800 rounded-2xl overflow-hidden aspect-video relative shadow-2xl">
+                    <video id="remoteVideo" autoplay playsinline class="bg-gray-700"></video>
+                    <div id="status-container" class="absolute top-0 left-0 w-full h-full flex items-center justify-center pointer-events-none">
+                         <p id="status-message" class="text-white bg-black bg-opacity-50 px-4 py-2 rounded-lg">Looking for a stranger...</p>
+                    </div>
+                </div>
+                <!-- Local Video -->
+                <div class="bg-gray-800 rounded-2xl overflow-hidden aspect-video relative shadow-2xl">
+                    <video id="localVideo" autoplay playsinline muted class="bg-gray-700"></video>
+                </div>
+            </div>
+            <!-- Action Buttons -->
+            <div id="controls" class="flex justify-center items-center gap-4 mt-6">
+                 <button id="mic-btn" class="p-4 bg-gray-700 rounded-full hover:bg-gray-600 transition-colors duration-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-mic"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                </button>
+                 <button id="end-btn" class="p-4 bg-red-600 rounded-full hover:bg-red-700 transition-colors duration-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-phone-off"><path d="M10.68 13.31a16 16 0 0 0 3.41 3.41l3.17-3.17a2 2 0 0 1 2.83 2.83l-1.85 1.85a16 16 0 0 1-18-18l1.85-1.85a2 2 0 0 1 2.83 2.83z"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+                </button>
+                 <button id="next-btn" class="p-4 bg-indigo-600 rounded-full hover:bg-indigo-700 transition-colors duration-300">
+                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-skip-forward"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, doc, addDoc, getDoc, setDoc, updateDoc, onSnapshot, deleteDoc, query, where, getDocs, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        // --- IMPORTANT: CONFIGURE FIREBASE ---
+        // 1. Go to https://firebase.google.com/ and create a new project.
+        // 2. In your project, create a new Web App.
+        // 3. Copy the firebaseConfig object here.
+        // 4. In Firestore Database -> Rules, paste the following and publish:
+        //    rules_version = '2';
+        //    service cloud.firestore {
+        //      match /databases/{database}/documents {
+        //        match /rooms/{roomId}/{document=**} {
+        //          allow read, write: if request.auth != null;
+        //        }
+        //      }
+        //    }
+        // 5. In Authentication -> Sign-in method, enable "Anonymous" sign-in.
+        
+        const firebaseConfig = {
+            apiKey: "AIzaSyABtePIJralQq9CfWG33cgLrOAxX42qs-E",
+            authDomain: "lilboconnets.firebaseapp.com",
+            projectId: "lilboconnets",
+            storageBucket: "lilboconnets.firebasestorage.app",
+            messagingSenderId: "978085563641",
+            appId: "1:978085563641:web:ee90b702a35a180a48e628",
+            measurementId: "G-YM39TB66YH"
+        };
+
+        // HTML Elements
+        const startBtn = document.getElementById('start-btn');
+        const landingPage = document.getElementById('landing-page');
+        const chatPage = document.getElementById('chat-page');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const endBtn = document.getElementById('end-btn');
+        const nextBtn = document.getElementById('next-btn');
+        const micBtn = document.getElementById('mic-btn');
+        const statusMessage = document.getElementById('status-message');
+        const statusContainer = document.getElementById('status-container');
+        const errorContainer = document.getElementById('error-container');
+
+        // Check for Firebase config before initializing
+        if (firebaseConfig.apiKey === "YOUR_API_KEY") {
+            errorContainer.textContent = "CRITICAL: Firebase is not configured! Please follow the setup steps in the code comments.";
+            errorContainer.classList.remove('hidden');
+            startBtn.disabled = true;
+            startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+
+        // --- APPLICATION LOGIC ---
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        const servers = {
+            iceServers: [
+                { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
+            ],
+            iceCandidatePoolSize: 10,
+        };
+
+        let pc; // Peer Connection
+        let localStream;
+        let remoteStream;
+        let currentRoomId;
+        let isMicMuted = false;
+
+        // --- CORE FUNCTIONS ---
+
+        // Function to start the connection process
+        const startConnection = async () => {
+            errorContainer.classList.add('hidden'); // Hide any previous errors
+            if (!auth.currentUser) {
+                await signInAnonymously(auth);
+            }
+
+            statusMessage.textContent = 'Getting your camera ready...';
+            
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                remoteStream = new MediaStream();
+                remoteVideo.srcObject = remoteStream;
+            } catch (error) {
+                console.error("Error accessing media devices.", error);
+                errorContainer.textContent = "Could not access your camera and microphone. Please allow access and try again.";
+                errorContainer.classList.remove('hidden');
+                return;
+            }
+
+            showChatPage();
+            await findOrCreateRoom();
+        };
+
+        // Finds a waiting room or creates a new one
+        const findOrCreateRoom = async () => {
+            statusMessage.textContent = 'Looking for a stranger...';
+            const roomsRef = collection(db, 'rooms');
+            // Check for rooms that have an offer but no answer
+            const q = query(roomsRef, where("answer", "==", null), where("offer", "!=", null), limit(1));
+            const snapshot = await getDocs(q);
+
+            if (!snapshot.empty) {
+                const roomDoc = snapshot.docs[0];
+                // Prevent joining your own room if you're the first one
+                if(roomDoc.data().offer.sdp === (await pc?.createOffer())?.sdp) {
+                    await createRoom();
+                    return;
+                }
+                currentRoomId = roomDoc.id;
+                await joinRoom(roomDoc.id, roomDoc.data().offer);
+            } else {
+                await createRoom();
+            }
+        };
+
+        // Creates a new room and waits for a peer
+        const createRoom = async () => {
+            pc = new RTCPeerConnection(servers);
+            registerPeerConnectionListeners();
+
+            localStream.getTracks().forEach(track => {
+                pc.addTrack(track, localStream);
+            });
+
+            const roomRef = doc(collection(db, 'rooms'));
+            currentRoomId = roomRef.id;
+            const offerCandidates = collection(roomRef, 'offerCandidates');
+            
+            pc.onicecandidate = event => {
+                if (event.candidate) {
+                    addDoc(offerCandidates, event.candidate.toJSON());
+                }
+            };
+
+            const offerDescription = await pc.createOffer();
+            await pc.setLocalDescription(offerDescription);
+
+            const offer = {
+                sdp: offerDescription.sdp,
+                type: offerDescription.type,
+            };
+
+            // Use setDoc to create the document with our specific roomRef ID
+            await setDoc(roomRef, { offer, answer: null });
+
+            // Listen for the answer and connect
+            onSnapshot(roomRef, async (snapshot) => {
+                const data = snapshot.data();
+                if (data && data.answer && !pc.currentRemoteDescription) {
+                    const answerDescription = new RTCSessionDescription(data.answer);
+                    await pc.setRemoteDescription(answerDescription);
+
+                    // Listen for answer candidates
+                    onSnapshot(collection(db, 'rooms', currentRoomId, 'answerCandidates'), (snapshot) => {
+                         snapshot.docChanges().forEach((change) => {
+                            if (change.type === 'added') {
+                                const candidate = new RTCIceCandidate(change.doc.data());
+                                pc.addIceCandidate(candidate);
+                            }
+                        });
+                    });
+                }
+            });
+        };
+        
+        // Joins an existing room
+        const joinRoom = async (roomId, offer) => {
+            pc = new RTCPeerConnection(servers);
+            registerPeerConnectionListeners();
+        
+            localStream.getTracks().forEach(track => {
+                pc.addTrack(track, localStream);
+            });
+        
+            const answerCandidates = collection(db, 'rooms', roomId, 'answerCandidates');
+            pc.onicecandidate = event => {
+                if (event.candidate) {
+                    addDoc(answerCandidates, event.candidate.toJSON());
+                }
+            };
+        
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        
+            const answerDescription = await pc.createAnswer();
+            await pc.setLocalDescription(answerDescription);
+        
+            const answer = {
+                type: answerDescription.type,
+                sdp: answerDescription.sdp,
+            };
+        
+            await updateDoc(doc(db, 'rooms', roomId), { answer });
+        
+            // Listen for offer candidates
+            onSnapshot(collection(db, 'rooms', roomId, 'offerCandidates'), (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    if (change.type === 'added') {
+                        let data = change.doc.data();
+                        pc.addIceCandidate(new RTCIceCandidate(data));
+                    }
+                });
+            });
+        };
+
+        // Hang up the call
+        const hangUp = async () => {
+             if (pc) {
+                pc.close();
+                pc = null;
+            }
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
+            remoteVideo.srcObject = null;
+            
+            if (currentRoomId) {
+                const roomRef = doc(db, 'rooms', currentRoomId);
+                const offerCandidates = await getDocs(collection(roomRef, 'offerCandidates'));
+                offerCandidates.forEach(async candidate => await deleteDoc(candidate.ref));
+                
+                const answerCandidates = await getDocs(collection(roomRef, 'answerCandidates'));
+                answerCandidates.forEach(async candidate => await deleteDoc(candidate.ref));
+                
+                await deleteDoc(roomRef);
+                currentRoomId = null;
+            }
+        };
+        
+        // --- UI and EVENT LISTENERS ---
+        
+        function registerPeerConnectionListeners() {
+            pc.oniceconnectionstatechange = () => {
+                console.log(`ICE state: ${pc.iceConnectionState}`);
+                if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                    statusContainer.style.display = 'none';
+                }
+                if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'closed') {
+                    handleDisconnect();
+                }
+            };
+            pc.ontrack = (event) => {
+                event.streams[0].getTracks().forEach(track => {
+                    remoteStream.addTrack(track);
+                });
+            };
+        }
+
+        function handleDisconnect() {
+            statusMessage.textContent = 'Stranger disconnected. Finding another...';
+            statusContainer.style.display = 'flex';
+            setTimeout(async () => {
+                await hangUp();
+                await startConnection();
+            }, 3000); // Wait 3 seconds before finding a new match
+        }
+
+        function showChatPage() {
+            landingPage.classList.add('opacity-0', 'hidden');
+            chatPage.classList.remove('hidden');
+            chatPage.classList.add('opacity-100');
+        }
+
+        function showLandingPage() {
+            chatPage.classList.add('opacity-0', 'hidden');
+            landingPage.classList.remove('hidden');
+            landingPage.classList.add('opacity-100');
+        }
+
+        startBtn.onclick = startConnection;
+
+        endBtn.onclick = async () => {
+            await hangUp();
+            showLandingPage();
+        };
+        
+        nextBtn.onclick = async () => {
+            await hangUp();
+            await startConnection();
+        };
+
+        micBtn.onclick = () => {
+            if (localStream) {
+                isMicMuted = !isMicMuted;
+                localStream.getAudioTracks()[0].enabled = !isMicMuted;
+                micBtn.classList.toggle('bg-red-600', isMicMuted);
+                micBtn.classList.toggle('bg-gray-700', !isMicMuted);
+                // Simple SVG toggle for visual feedback
+                micBtn.innerHTML = isMicMuted ? 
+                    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-mic-off"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 .84 2.02"/><path d="M12 19v3"/></svg>` :
+                    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-mic"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>`;
+            }
+        };
+
+        // Cleanup on page close
+        window.addEventListener('beforeunload', hangUp);
+
+    </script>
+</body>
+</html>
+
