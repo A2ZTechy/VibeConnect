@@ -83,30 +83,16 @@
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
         // --- IMPORTANT: CONFIGURE FIREBASE ---
-        // 1. Go to https://firebase.google.com/ and create a new project.
-        // 2. In your project, create a new Web App.
-        // 3. Copy the firebaseConfig object here.
-        // 4. In Firestore Database -> Rules, paste the following and publish:
-        //    rules_version = '2';
-        //    service cloud.firestore {
-        //      match /databases/{database}/documents {
-        //        match /rooms/{roomId}/{document=**} {
-        //          allow read, write: if request.auth != null;
-        //        }
-        //      }
-        //    }
-        // 5. In Authentication -> Sign-in method, enable "Anonymous" sign-in.
-        
         const firebaseConfig = {
-            apiKey: "AIzaSyABtePIJralQq9CfWG33cgLrOAxX42qs-E",
-            authDomain: "lilboconnets.firebaseapp.com",
-            projectId: "lilboconnets",
-            storageBucket: "lilboconnets.firebasestorage.app",
-            messagingSenderId: "978085563641",
-            appId: "1:978085563641:web:ee90b702a35a180a48e628",
-            measurementId: "G-YM39TB66YH"
+          apiKey: "AIzaSyABtePIJralQq9CfWG33cgLrOAxX42qs-E",
+          authDomain: "lilboconnets.firebaseapp.com",
+          projectId: "lilboconnets",
+          storageBucket: "lilboconnets.appspot.com",
+          messagingSenderId: "978085563641",
+          appId: "1:978085563641:web:ee90b702a35a180a48e628",
+          measurementId: "G-YM39TB66YH"
         };
-
+        
         // HTML Elements
         const startBtn = document.getElementById('start-btn');
         const landingPage = document.getElementById('landing-page');
@@ -119,14 +105,6 @@
         const statusMessage = document.getElementById('status-message');
         const statusContainer = document.getElementById('status-container');
         const errorContainer = document.getElementById('error-container');
-
-        // Check for Firebase config before initializing
-        if (firebaseConfig.apiKey === "YOUR_API_KEY") {
-            errorContainer.textContent = "CRITICAL: Firebase is not configured! Please follow the setup steps in the code comments.";
-            errorContainer.classList.remove('hidden');
-            startBtn.disabled = true;
-            startBtn.classList.add('opacity-50', 'cursor-not-allowed');
-        }
 
         // --- APPLICATION LOGIC ---
         const app = initializeApp(firebaseConfig);
@@ -151,8 +129,18 @@
         // Function to start the connection process
         const startConnection = async () => {
             errorContainer.classList.add('hidden'); // Hide any previous errors
-            if (!auth.currentUser) {
-                await signInAnonymously(auth);
+            
+            let user = auth.currentUser;
+            if (!user) {
+                try {
+                    const userCredential = await signInAnonymously(auth);
+                    user = userCredential.user;
+                } catch (error) {
+                    console.error("Anonymous sign-in failed", error);
+                    errorContainer.textContent = "Could not connect to the server. Please try again later.";
+                    errorContainer.classList.remove('hidden');
+                    return;
+                }
             }
 
             statusMessage.textContent = 'Getting your camera ready...';
@@ -170,33 +158,39 @@
             }
 
             showChatPage();
-            await findOrCreateRoom();
+            await findOrCreateRoom(user.uid);
         };
 
         // Finds a waiting room or creates a new one
-        const findOrCreateRoom = async () => {
+        const findOrCreateRoom = async (userId) => {
             statusMessage.textContent = 'Looking for a stranger...';
             const roomsRef = collection(db, 'rooms');
-            // Check for rooms that have an offer but no answer
-            const q = query(roomsRef, where("answer", "==", null), where("offer", "!=", null), limit(1));
+            
+            // Query for a room that is waiting and wasn't created by the current user.
+            const q = query(
+                roomsRef,
+                where("answer", "==", null),
+                where("creatorId", "!=", userId),
+                limit(1)
+            );
+            
             const snapshot = await getDocs(q);
 
             if (!snapshot.empty) {
+                // Join the found room
                 const roomDoc = snapshot.docs[0];
-                // Prevent joining your own room if you're the first one
-                if(roomDoc.data().offer.sdp === (await pc?.createOffer())?.sdp) {
-                    await createRoom();
-                    return;
-                }
                 currentRoomId = roomDoc.id;
+                console.log(`Found room ${currentRoomId}, joining...`);
                 await joinRoom(roomDoc.id, roomDoc.data().offer);
             } else {
-                await createRoom();
+                // No available rooms, create a new one
+                console.log("No rooms found, creating a new one...");
+                await createRoom(userId);
             }
         };
 
         // Creates a new room and waits for a peer
-        const createRoom = async () => {
+        const createRoom = async (userId) => {
             pc = new RTCPeerConnection(servers);
             registerPeerConnectionListeners();
 
@@ -222,8 +216,8 @@
                 type: offerDescription.type,
             };
 
-            // Use setDoc to create the document with our specific roomRef ID
-            await setDoc(roomRef, { offer, answer: null });
+            // Use setDoc to create the document with our specific roomRef ID and add creatorId
+            await setDoc(roomRef, { offer, answer: null, creatorId: userId });
 
             // Listen for the answer and connect
             onSnapshot(roomRef, async (snapshot) => {
@@ -299,15 +293,20 @@
             remoteVideo.srcObject = null;
             
             if (currentRoomId) {
-                const roomRef = doc(db, 'rooms', currentRoomId);
-                const offerCandidates = await getDocs(collection(roomRef, 'offerCandidates'));
-                offerCandidates.forEach(async candidate => await deleteDoc(candidate.ref));
-                
-                const answerCandidates = await getDocs(collection(roomRef, 'answerCandidates'));
-                answerCandidates.forEach(async candidate => await deleteDoc(candidate.ref));
-                
-                await deleteDoc(roomRef);
-                currentRoomId = null;
+                try {
+                    const roomRef = doc(db, 'rooms', currentRoomId);
+                    const offerCandidates = await getDocs(collection(roomRef, 'offerCandidates'));
+                    offerCandidates.forEach(async candidate => await deleteDoc(candidate.ref));
+                    
+                    const answerCandidates = await getDocs(collection(roomRef, 'answerCandidates'));
+                    answerCandidates.forEach(async candidate => await deleteDoc(candidate.ref));
+                    
+                    await deleteDoc(roomRef);
+                } catch (error) {
+                    console.error("Error during cleanup: ", error);
+                } finally {
+                    currentRoomId = null;
+                }
             }
         };
         
@@ -335,7 +334,10 @@
             statusContainer.style.display = 'flex';
             setTimeout(async () => {
                 await hangUp();
-                await startConnection();
+                // Check if user is still on the chat page before reconnecting
+                if (!chatPage.classList.contains('hidden')) {
+                    await startConnection();
+                }
             }, 3000); // Wait 3 seconds before finding a new match
         }
 
@@ -349,6 +351,8 @@
             chatPage.classList.add('opacity-0', 'hidden');
             landingPage.classList.remove('hidden');
             landingPage.classList.add('opacity-100');
+            statusContainer.style.display = 'flex';
+            statusMessage.textContent = 'Looking for a stranger...';
         }
 
         startBtn.onclick = startConnection;
@@ -359,6 +363,8 @@
         };
         
         nextBtn.onclick = async () => {
+            statusMessage.textContent = 'Finding next stranger...';
+            statusContainer.style.display = 'flex';
             await hangUp();
             await startConnection();
         };
@@ -377,7 +383,12 @@
         };
 
         // Cleanup on page close
-        window.addEventListener('beforeunload', hangUp);
+        window.addEventListener('beforeunload', (e) => {
+            // This is a failsafe, but the primary cleanup is via the end button
+            if (currentRoomId) {
+                hangUp();
+            }
+        });
 
     </script>
 </body>
